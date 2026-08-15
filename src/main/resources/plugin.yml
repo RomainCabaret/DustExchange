@@ -1,0 +1,6 @@
+name: DustExchange
+version: '${version}'
+
+main: fr.romain.dustexchange.dustExchange.DustExchange
+api-version: '1.21.1'
+load: POSTWORLD
