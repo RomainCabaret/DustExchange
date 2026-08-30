@@ -1,0 +1,17 @@
+# Gradle & compilation
+.gradle/
+build/
+
+# Environnement de test local Paper (créé par le plugin run-paper)
+run/
+
+# Configuration IDE (IntelliJ IDEA)
+.idea/
+*.iml
+*.iws
+*.ipr
+out/
+
+# Fichiers système
+.DS_Store
+Thumbs.db

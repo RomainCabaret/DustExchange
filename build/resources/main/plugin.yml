@@ -1,6 +1,0 @@
-name: DustExchange
-version: '1.0-SNAPSHOT'
-
-main: fr.romain.dustexchange.dustExchange.DustExchange
-api-version: '1.21.1'
-load: POSTWORLD
