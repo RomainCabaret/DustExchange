@@ -43,8 +43,23 @@ public final class DustExchange extends JavaPlugin {
         this.marketManager = new MarketManager(storage);
         this.marketManager.loadAllStocks();
 
+        // ECOUTEUR (Pour update en temps réel même sur plusieurs serveurs)
+        this.storage.startListening(() -> {
+            getServer().getScheduler().runTask(this, () -> {
+
+                this.marketManager.loadAllStocks();
+
+                for (org.bukkit.entity.Player player : getServer().getOnlinePlayers()) {
+                    org.bukkit.inventory.InventoryView view = player.getOpenInventory();
+                    if (view.getTopInventory().getHolder() instanceof fr.romain.dustexchange.dustExchange.gui.MarketMenu menu) {
+                        menu.refresh();
+                    }
+                }
+            });
+        });
+
         // ------------- LISTENER -------------
-        getServer().getPluginManager().registerEvents(new InventoryClickListener(this.marketManager, this.economyManager), this);
+        getServer().getPluginManager().registerEvents(new InventoryClickListener(this, this.marketManager, this.economyManager), this);
 
         // ------------- COMMAND -------------
         CommandManager commandManager = new CommandManager(this);
