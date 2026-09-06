@@ -66,6 +66,10 @@ public class MarketItem {
         return currentStock;
     }
 
+    public void setCurrentStock(int currentStock) {
+        this.currentStock = currentStock;
+    }
+
     public double getMinPrice() { return minPrice; }
     public double getMaxPrice() { return maxPrice; }
 }

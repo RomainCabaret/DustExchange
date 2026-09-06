@@ -15,6 +15,8 @@ dependencies {
     compileOnly("com.github.MilkBowl:VaultAPI:1.7") {
         exclude(group = "org.bukkit", module = "bukkit")
     }
+
+    implementation("redis.clients:jedis:8.0.1")
 }
 
 

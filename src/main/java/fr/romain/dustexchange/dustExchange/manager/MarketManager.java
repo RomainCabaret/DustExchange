@@ -1,6 +1,7 @@
 package fr.romain.dustexchange.dustExchange.manager;
 
 import fr.romain.dustexchange.dustExchange.model.MarketItem;
+import fr.romain.dustexchange.dustExchange.storage.MarketStorage;
 import org.bukkit.Material;
 
 import java.util.Collections;
@@ -10,8 +11,10 @@ import java.util.Optional;
 
 public class MarketManager {
     private final Map<Material, MarketItem> items = new HashMap<>();
+    private final MarketStorage storage;
 
-    public MarketManager() {
+    public MarketManager(MarketStorage storage) {
+        this.storage = storage;
         loadDefaultItems();
     }
 
@@ -20,6 +23,17 @@ public class MarketManager {
         registerItem(new MarketItem(Material.GOLD_INGOT, 35.0, 2000, 2000));
         registerItem(new MarketItem(Material.IRON_INGOT, 10.0, 5000, 5000));
         registerItem(new MarketItem(Material.NETHERITE_INGOT, 800.0, 50, 50));
+    }
+
+    public void loadAllStocks() {
+        for (MarketItem item : items.values()) {
+
+            int savedStock = storage.getStock(item.getMaterial());
+
+            if (savedStock != -1) {
+                item.setCurrentStock(savedStock);
+            }
+        }
     }
 
     public void registerItem(MarketItem item) {
@@ -32,5 +46,9 @@ public class MarketManager {
 
     public Map<Material, MarketItem> getItems() {
         return Collections.unmodifiableMap(items);
+    }
+
+    public MarketStorage getStorage() {
+        return storage;
     }
 }

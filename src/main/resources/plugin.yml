@@ -4,3 +4,8 @@ main: fr.romain.dustexchange.dustExchange.DustExchange
 api-version: '1.21.8'
 load: POSTWORLD
 depend: [Vault]
+libraries:
+  - redis.clients:jedis:8.0.1
+redis:
+  host: "127.0.0.1"
+  port: 6379

@@ -31,36 +31,27 @@ public class InventoryClickListener implements Listener {
         }
         event.setCancelled(true);
 
-        if (event.getInventory().getHolder() instanceof MarketMenu) {
-            event.setCancelled(true);
-
-            if (event.getClickedInventory() == null || !(event.getClickedInventory().getHolder() instanceof MarketMenu)) {
-                return;
-            }
-
-            if (event.getClickedInventory() == null || !(event.getClickedInventory().getHolder() instanceof MarketMenu)) {
-                return;
-            }
-
-            ItemStack clicked = event.getCurrentItem();
-            if (clicked == null || clicked.getType().isAir() || clicked.getType() == Material.GRAY_STAINED_GLASS_PANE) {
-                return;
-            }
-
-            if (!(event.getWhoClicked() instanceof Player player)) {
-                return;
-            }
-
-            Material material = clicked.getType();
-
-            marketManager.getItem(material).ifPresent(item -> {
-                if (event.isLeftClick()) {
-                    handleBuy(player, item, marketMenu);
-                } else if (event.isRightClick()) {
-                    handleSell(player, item, marketMenu);
-                }
-            });
+        if (event.getClickedInventory() == null || !(event.getClickedInventory().getHolder() instanceof MarketMenu)) {
+            return;
         }
+
+        ItemStack clicked = event.getCurrentItem();
+        if (clicked == null || clicked.getType().isAir() || clicked.getType() == Material.GRAY_STAINED_GLASS_PANE) {
+            return;
+        }
+
+        if (!(event.getWhoClicked() instanceof Player player)) {
+            return;
+        }
+        Material material = clicked.getType();
+
+        marketManager.getItem(material).ifPresent(item -> {
+            if (event.isLeftClick()) {
+                handleBuy(player, item, marketMenu);
+            } else if (event.isRightClick()) {
+                handleSell(player, item, marketMenu);
+            }
+        });
     }
     private void handleBuy(Player player, MarketItem item, MarketMenu menu) {
         if (item.getCurrentStock() <= 0) {
@@ -82,6 +73,7 @@ public class InventoryClickListener implements Listener {
 
         if (economyManager.withdraw(player, price)) {
             item.removeStock(1);
+            marketManager.getStorage().saveStock(item.getMaterial(), item.getCurrentStock());
             player.getInventory().addItem(new ItemStack(item.getMaterial(), 1));
 
             player.sendMessage(Component.text("Achat validé pour ", NamedTextColor.GREEN)
@@ -105,7 +97,7 @@ public class InventoryClickListener implements Listener {
 
         if (economyManager.deposit(player, price)) {
             item.addStock(1);
-
+            marketManager.getStorage().saveStock(item.getMaterial(), item.getCurrentStock());
             player.sendMessage(Component.text("Vente validée pour ", NamedTextColor.GREEN)
                     .append(Component.text(price + " $", NamedTextColor.YELLOW)));
             menu.refresh();
