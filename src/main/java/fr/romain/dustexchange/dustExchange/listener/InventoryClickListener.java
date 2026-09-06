@@ -1,10 +1,12 @@
 package fr.romain.dustexchange.dustExchange.listener;
 
 import fr.romain.dustexchange.dustExchange.gui.MarketMenu;
+import fr.romain.dustexchange.dustExchange.manager.EconomyManager;
 import fr.romain.dustexchange.dustExchange.manager.MarketManager;
 import fr.romain.dustexchange.dustExchange.model.MarketItem;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
+import net.milkbowl.vault.economy.Economy;
 import org.bukkit.Material;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
@@ -15,9 +17,11 @@ import org.bukkit.inventory.ItemStack;
 public class InventoryClickListener implements Listener {
 
     private final MarketManager marketManager;
+    private final EconomyManager economyManager;
 
-    public InventoryClickListener(MarketManager marketManager) {
+    public InventoryClickListener(MarketManager marketManager, EconomyManager economyManager) {
         this.marketManager = marketManager;
+        this.economyManager = economyManager;
     }
 
     @EventHandler
@@ -69,33 +73,45 @@ public class InventoryClickListener implements Listener {
             return;
         }
 
-        item.removeStock(1);
+        double price = item.getBuyPrice();
 
-        player.getInventory().addItem(new ItemStack(item.getMaterial(), 1));
+        if (!economyManager.hasMoney(player, price)) {
+            player.sendMessage(Component.text("Fonds insuffisants ! Coût : " + price + " $", NamedTextColor.RED));
+            return;
+        }
 
-        player.sendMessage(Component.text("Achat effectué : ", NamedTextColor.GREEN)
-                .append(Component.text(item.getMaterial().name(), NamedTextColor.GOLD))
-                .append(Component.text(" au prix de ", NamedTextColor.GREEN))
-                .append(Component.text(item.getBuyPrice() + " $", NamedTextColor.YELLOW)));
+        if (economyManager.withdraw(player, price)) {
+            item.removeStock(1);
+            player.getInventory().addItem(new ItemStack(item.getMaterial(), 1));
 
-        menu.refresh();
+            player.sendMessage(Component.text("Achat validé pour ", NamedTextColor.GREEN)
+                    .append(Component.text(price + " $", NamedTextColor.YELLOW)));
+            menu.refresh();
+        } else {
+            player.sendMessage(Component.text("Erreur système lors du paiement.", NamedTextColor.RED));
+        }
     }
 
     private void handleSell(Player player, MarketItem item, MarketMenu menu) {
-        if (!player.getInventory().containsAtLeast(new ItemStack(item.getMaterial()), 1)) {
+        ItemStack itemToSell = new ItemStack(item.getMaterial(), 1);
+        if (!player.getInventory().containsAtLeast(itemToSell, 1)) {
             player.sendMessage(Component.text("Vous ne possédez pas cet objet !", NamedTextColor.RED));
             return;
         }
 
-        player.getInventory().removeItem(new ItemStack(item.getMaterial(), 1));
+        double price = item.getSellPrice();
 
-        item.addStock(1);
+        player.getInventory().removeItem(itemToSell);
 
-        player.sendMessage(Component.text("Vente effectuée : ", NamedTextColor.GREEN)
-                .append(Component.text(item.getMaterial().name(), NamedTextColor.GOLD))
-                .append(Component.text(" pour ", NamedTextColor.GREEN))
-                .append(Component.text(item.getSellPrice() + " $", NamedTextColor.YELLOW)));
+        if (economyManager.deposit(player, price)) {
+            item.addStock(1);
 
-        menu.refresh();
+            player.sendMessage(Component.text("Vente validée pour ", NamedTextColor.GREEN)
+                    .append(Component.text(price + " $", NamedTextColor.YELLOW)));
+            menu.refresh();
+        } else {
+            player.getInventory().addItem(itemToSell);
+            player.sendMessage(Component.text("Erreur système lors de la transaction, item restitué.", NamedTextColor.RED));
+        }
     }
 }
