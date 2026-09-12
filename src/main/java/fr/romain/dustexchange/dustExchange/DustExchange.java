@@ -1,12 +1,14 @@
 package fr.romain.dustexchange.dustExchange;
 
 import fr.romain.dustexchange.dustExchange.command.MarketCommand;
+import fr.romain.dustexchange.dustExchange.hook.DustExchangeExpansion;
 import fr.romain.dustexchange.dustExchange.listener.InventoryClickListener;
 import fr.romain.dustexchange.dustExchange.manager.CommandManager;
 import fr.romain.dustexchange.dustExchange.manager.EconomyManager;
 import fr.romain.dustexchange.dustExchange.manager.MarketManager;
 import fr.romain.dustexchange.dustExchange.storage.MarketStorage;
 import fr.romain.dustexchange.dustExchange.storage.RedisMarketStorage;
+import org.bukkit.Bukkit;
 import org.bukkit.plugin.java.JavaPlugin;
 
 public final class DustExchange extends JavaPlugin {
@@ -42,6 +44,11 @@ public final class DustExchange extends JavaPlugin {
 
         this.marketManager = new MarketManager(storage);
         this.marketManager.loadAllStocks();
+
+        // PlaceholderAPI
+        if (Bukkit.getPluginManager().getPlugin("PlaceholderAPI") != null) {
+            new DustExchangeExpansion(this.marketManager).register();
+        }
 
         // ECOUTEUR (Pour update en temps réel même sur plusieurs serveurs)
         this.storage.startListening(() -> {

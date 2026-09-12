@@ -4,6 +4,7 @@ main: fr.romain.dustexchange.dustExchange.DustExchange
 api-version: '1.21.8'
 load: POSTWORLD
 depend: [Vault]
+softdepend: [PlaceholderAPI]
 libraries:
   - redis.clients:jedis:8.0.1
 redis:
