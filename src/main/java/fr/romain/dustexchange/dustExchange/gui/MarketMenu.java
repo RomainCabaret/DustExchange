@@ -12,11 +12,14 @@ import org.bukkit.entity.Player;
 import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.InventoryHolder;
 import org.bukkit.inventory.ItemStack;
+import org.bukkit.inventory.meta.ItemMeta;
 import org.jetbrains.annotations.NotNull;
 
 import java.awt.*;
 
 public class MarketMenu implements InventoryHolder {
+    public static final int GUI_ITEMPICKUP_SLOT = 26;
+
     private final Inventory inventory;
     private final MarketManager marketManager;
 
@@ -61,6 +64,20 @@ public class MarketMenu implements InventoryHolder {
 
             inventory.setItem(slot++, display);
         }
+
+        // ------------ PendingClaim CHEST ------------
+
+        ItemStack claimBox = new ItemStack(Material.ENDER_CHEST);
+        ItemMeta claimMeta = claimBox.getItemMeta();
+        claimMeta.displayName(Component.text("Coffre de Récupération", NamedTextColor.GOLD));
+        claimMeta.lore(java.util.List.of(
+                Component.text("Vos objets perdus ou en attente", NamedTextColor.GRAY),
+                Component.text("sont stockés ici. Cliquez pour", NamedTextColor.GRAY),
+                Component.text("tout récupérer.", NamedTextColor.GRAY)
+        ));
+        claimBox.setItemMeta(claimMeta);
+
+        inventory.setItem(GUI_ITEMPICKUP_SLOT, claimBox);
     }
 
     public void open(Player player) {

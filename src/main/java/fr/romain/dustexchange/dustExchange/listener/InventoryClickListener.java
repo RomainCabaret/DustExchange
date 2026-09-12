@@ -16,6 +16,7 @@ import org.bukkit.event.inventory.InventoryClickEvent;
 import org.bukkit.inventory.ItemStack;
 
 import java.util.HashSet;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
@@ -50,8 +51,6 @@ import java.util.concurrent.CompletableFuture;
  *    Si le joueur n'a pas l'argent, on lance un 'runAsync' de Rollback (remboursement Redis)
  *    en mode "Fire and Forget" (on l'envoie et on n'attend pas la réponse).
  * ====================================================================================
- *
- * TODO La faille de la déconnexion
  */
 public class InventoryClickListener implements Listener {
 
@@ -59,7 +58,7 @@ public class InventoryClickListener implements Listener {
     private final EconomyManager economyManager;
     private final DustExchange plugin;
 
-    private final Set<UUID> processingPlayers = new HashSet<>();
+    private final Set<UUID> processingPlayers = java.util.concurrent.ConcurrentHashMap.newKeySet();
 
     public InventoryClickListener(DustExchange plugin, MarketManager marketManager, EconomyManager economyManager) {
         this.plugin = plugin;
@@ -86,6 +85,11 @@ public class InventoryClickListener implements Listener {
         if (!(event.getWhoClicked() instanceof Player player)) {
             return;
         }
+        if (event.getSlot() == MarketMenu.GUI_ITEMPICKUP_SLOT && clicked.getType() == Material.ENDER_CHEST) {
+            handleClaimClick(player);
+            return;
+        }
+
         Material material = clicked.getType();
 
         marketManager.getItem(material).ifPresent(item -> {
@@ -100,10 +104,7 @@ public class InventoryClickListener implements Listener {
         UUID uuid = player.getUniqueId();
 
         if (!processingPlayers.add(uuid)) {
-            return;
-        }
-        if (player.getInventory().firstEmpty() == -1) {
-            player.sendMessage(Component.text("Votre inventaire est plein !", NamedTextColor.RED));
+            player.sendActionBar(Component.text("Vous avez déjà une transaction en cours, veuillez patienter.", NamedTextColor.RED));
             return;
         }
 
@@ -121,6 +122,10 @@ public class InventoryClickListener implements Listener {
             Bukkit.getScheduler().runTask(plugin, () -> {
 
                 try {
+                    if (!player.isOnline()) {
+                        CompletableFuture.runAsync(() -> marketManager.getStorage().modifyStock(item.getMaterial(), 1));
+                        return;
+                    }
                     if (newStock == -999) {
                         player.sendMessage(Component.text("Erreur réseau : impossible de contacter la bourse.", NamedTextColor.RED));
                         return;
@@ -150,7 +155,14 @@ public class InventoryClickListener implements Listener {
                     }
 
                     if (economyManager.withdraw(player, truePrice)) {
-                        player.getInventory().addItem(new ItemStack(item.getMaterial(), 1));
+
+                        Map<Integer, ItemStack> leftovers = player.getInventory().addItem(new ItemStack(item.getMaterial(), 1));
+
+                        if (!leftovers.isEmpty()) {
+                            CompletableFuture.runAsync(() -> marketManager.getStorage().addPendingClaim(uuid, item.getMaterial().name(), 1));
+                            player.sendMessage(Component.text("Inventaire plein ! L'objet a été envoyé dans votre coffre de récupération (/market).", NamedTextColor.GOLD));
+                        }
+
                         player.sendMessage(Component.text("Achat validé pour ", NamedTextColor.GREEN)
                                 .append(Component.text(truePrice + " $", NamedTextColor.YELLOW)));
 
@@ -164,6 +176,11 @@ public class InventoryClickListener implements Listener {
                     processingPlayers.remove(uuid);
                 }
             });
+        }).exceptionally(ex -> {
+            plugin.getLogger().severe("Erreur asynchrone (Buy) : " + ex.getMessage());
+            processingPlayers.remove(uuid);
+            if (player.isOnline()) player.sendActionBar(Component.text("Une erreur interne est survenue.", NamedTextColor.RED));
+            return null;
         });
     }
 
@@ -171,6 +188,7 @@ public class InventoryClickListener implements Listener {
         UUID uuid = player.getUniqueId();
 
         if (!processingPlayers.add(uuid)) {
+            player.sendActionBar(Component.text("Vous avez déjà une transaction en cours, veuillez patienter.", NamedTextColor.RED));
             return;
         }
 
@@ -190,8 +208,15 @@ public class InventoryClickListener implements Listener {
             Bukkit.getScheduler().runTask(plugin, () -> {
 
                 try {
+                    if (!player.isOnline()) {
+                        CompletableFuture.runAsync(() -> {
+                            marketManager.getStorage().modifyStock(item.getMaterial(), -1);
+                            marketManager.getStorage().addPendingClaim(uuid, item.getMaterial().name(), 1);
+                        });
+                        return;
+                    }
                     if (newStock == -999 || newStock < 0) {
-                        player.getInventory().addItem(itemToSell);
+                        refundItem(player, uuid, item);
                         player.sendMessage(Component.text("Erreur réseau : impossible de contacter la bourse.", NamedTextColor.RED));
                         return;
                     }
@@ -201,7 +226,7 @@ public class InventoryClickListener implements Listener {
 
                     if (truePrice < expectedPrice - 0.01) {
                         CompletableFuture.runAsync(() -> marketManager.getStorage().modifyStock(item.getMaterial(), -1));
-                        player.getInventory().addItem(itemToSell);
+                        refundItem(player, uuid, item);
                         item.setCurrentStock(newStock.intValue() - 1);
                         player.sendMessage(Component.text("Le prix de rachat a chuté ! Transaction annulée.", NamedTextColor.RED));
                         menu.refresh();
@@ -216,13 +241,101 @@ public class InventoryClickListener implements Listener {
                         menu.refresh();
                     } else {
                         CompletableFuture.runAsync(() -> marketManager.getStorage().modifyStock(item.getMaterial(), -1));
-                        player.getInventory().addItem(itemToSell);
+                        refundItem(player, uuid, item);
                         player.sendMessage(Component.text("Erreur de la banque lors du transfert des fonds. Objet restitué.", NamedTextColor.RED));
                     }
                 } finally {
                     processingPlayers.remove(uuid);
                 }
             });
+        }).exceptionally(ex -> {
+            plugin.getLogger().severe("Erreur asynchrone (Sell) : " + ex.getMessage());
+
+            Bukkit.getScheduler().runTask(plugin, () -> {
+                if (player.isOnline()) {
+                    refundItem(player, uuid, item);
+                    player.sendActionBar(Component.text("Erreur réseau. Objet restitué.", NamedTextColor.RED));
+                } else {
+                    CompletableFuture.runAsync(() -> marketManager.getStorage().addPendingClaim(uuid, item.getMaterial().name(), 1));
+                }
+            });
+
+            processingPlayers.remove(uuid);
+            return null;
         });
+    }
+    private void handleClaimClick(Player player) {
+        UUID uuid = player.getUniqueId();
+
+        if (!processingPlayers.add(uuid)) {
+            player.sendActionBar(Component.text("Vous avez déjà une transaction en cours, veuillez patienter.", NamedTextColor.RED));
+            return;
+        }
+
+        CompletableFuture.supplyAsync(() -> marketManager.getStorage().getPendingClaims(uuid))
+                .thenAccept(claims -> {
+
+                    Bukkit.getScheduler().runTask(plugin, () -> {
+                        try {
+                            if (!player.isOnline()) return;
+
+                            if (claims == null || claims.isEmpty()) {
+                                player.sendMessage(Component.text("Votre coffre est vide.", NamedTextColor.RED));
+                                return;
+                            }
+
+                            boolean inventoryFull = false;
+
+                            for (Map.Entry<String, String> entry : claims.entrySet()) {
+                                Material mat = Material.matchMaterial(entry.getKey());
+                                if (mat == null) continue;
+
+                                int totalAmount = Integer.parseInt(entry.getValue());
+                                if (totalAmount <= 0) {
+                                    CompletableFuture.runAsync(() -> marketManager.getStorage().removePendingClaim(uuid, mat.name()));
+                                    continue;
+                                }
+
+                                Map<Integer, ItemStack> leftovers = player.getInventory().addItem(new ItemStack(mat, totalAmount));
+
+                                if (leftovers.isEmpty()) {
+                                    CompletableFuture.runAsync(() -> marketManager.getStorage().removePendingClaim(uuid, mat.name()));
+                                } else {
+                                    int leftoverAmount = leftovers.values().stream().mapToInt(ItemStack::getAmount).sum();
+                                    int amountGiven = totalAmount - leftoverAmount;
+
+                                    if (amountGiven > 0) {
+                                        CompletableFuture.runAsync(() -> marketManager.getStorage().addPendingClaim(uuid, mat.name(), -amountGiven));
+                                    }
+                                    inventoryFull = true;
+                                }
+                            }
+
+                            if (inventoryFull) {
+                                player.sendMessage(Component.text("Votre inventaire est plein ! Videz-le pour récupérer le reste.", NamedTextColor.RED));
+                            } else {
+                                player.sendMessage(Component.text("Tous vos objets ont été récupérés !", NamedTextColor.GREEN));
+                            }
+
+                        } finally {
+                            processingPlayers.remove(uuid);
+                        }
+                    });
+                }).exceptionally(ex -> {
+                    plugin.getLogger().severe("Erreur asynchrone (Claim) : " + ex.getMessage());
+                    processingPlayers.remove(uuid);
+                    if (player.isOnline()) player.sendActionBar(Component.text("Erreur lors de la lecture du coffre.", NamedTextColor.RED));
+                    return null;
+                });
+    }
+
+    private void refundItem(Player player, UUID uuid, MarketItem item) {
+        ItemStack itemToRefund = new ItemStack(item.getMaterial(), 1);
+        Map<Integer, ItemStack> leftovers = player.getInventory().addItem(itemToRefund);
+
+        if (!leftovers.isEmpty()) {
+            CompletableFuture.runAsync(() -> marketManager.getStorage().addPendingClaim(uuid, item.getMaterial().name(), 1));
+            player.sendMessage(Component.text("Inventaire plein ! L'objet refusé a été placé dans votre coffre (/market).", NamedTextColor.GOLD));
+        }
     }
 }

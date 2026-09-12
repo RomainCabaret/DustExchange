@@ -1,9 +1,12 @@
 package fr.romain.dustexchange.dustExchange.storage;
 
 import org.bukkit.Material;
+import redis.clients.jedis.Jedis;
 import redis.clients.jedis.JedisPubSub;
 import redis.clients.jedis.RedisClient;
 
+import java.util.Map;
+import java.util.UUID;
 import java.util.logging.Logger;
 
 public class RedisMarketStorage implements MarketStorage {
@@ -13,6 +16,7 @@ public class RedisMarketStorage implements MarketStorage {
 
     private static final String REDIS_KEY = "dustexchange:stocks";
     private static final String CHANNEL = "dustexchange:sync";
+    private static final String CLAIMS_PREFIX = "dustexchange:claims:";
 
     private Thread subscriberThread;
     private JedisPubSub jedisPubSub;
@@ -86,6 +90,32 @@ public class RedisMarketStorage implements MarketStorage {
         if (client != null) {
             client.close();
             logger.info("Connexion Redis fermee.");
+        }
+    }
+    // --------------- PENDING CLAIM SYSTEME
+
+    public void addPendingClaim(UUID uuid, String material, int amount) {
+        try {
+            client.hincrBy(CLAIMS_PREFIX + uuid.toString(), material, amount);
+        } catch (Exception e) {
+            logger.severe("Erreur Redis (AddClaim) : " + e.getMessage());
+        }
+    }
+
+    public Map<String, String> getPendingClaims(UUID uuid) {
+        try {
+            return client.hgetAll(CLAIMS_PREFIX + uuid.toString());
+        } catch (Exception e) {
+            logger.severe("Erreur Redis (GetClaims) : " + e.getMessage());
+            return java.util.Collections.emptyMap();
+        }
+    }
+
+    public void removePendingClaim(UUID uuid, String material) {
+        try {
+            client.hdel(CLAIMS_PREFIX + uuid.toString(), material);
+        } catch (Exception e) {
+            logger.severe("Erreur Redis (RemoveClaim) : " + e.getMessage());
         }
     }
 }
