@@ -8,11 +8,11 @@ import fr.romain.dustexchange.dustExchange.manager.EconomyManager;
 import fr.romain.dustexchange.dustExchange.manager.MarketManager;
 import fr.romain.dustexchange.dustExchange.storage.MarketStorage;
 import fr.romain.dustexchange.dustExchange.storage.RedisMarketStorage;
+import fr.romain.dustexchange.dustExchange.util.ConfigKeys;
 import org.bukkit.Bukkit;
 import org.bukkit.plugin.java.JavaPlugin;
 
 public final class DustExchange extends JavaPlugin {
-
 
     private static final String DEFAULT_REDIS_HOST = "127.0.0.1";
     private static final int DEFAULT_REDIS_PORT = 6379;
@@ -35,15 +35,14 @@ public final class DustExchange extends JavaPlugin {
         }
 
         // Initialisation de la BDD
-        String host = getConfig().getString("redis.host", DEFAULT_REDIS_HOST);
-        int port = getConfig().getInt("redis.port", DEFAULT_REDIS_PORT);
-        String username = getConfig().getString("redis.username", DEFAULT_REDIS_USERNAME);
-        String password = getConfig().getString("redis.password", DEFAULT_REDIS_PASSWORD);
+        String host = getConfig().getString(ConfigKeys.REDIS_HOST, DEFAULT_REDIS_HOST);
+        int port = getConfig().getInt(ConfigKeys.REDIS_PORT, DEFAULT_REDIS_PORT);
+        //String username = getConfig().getString(ConfigKeys.REDIS_USERNAME, DEFAULT_REDIS_USERNAME);
+        //String password = getConfig().getString(ConfigKeys.REDIS_PASSWORD, DEFAULT_REDIS_PASSWORD);
 
         this.storage = new RedisMarketStorage(host, port, getLogger());
 
-        this.marketManager = new MarketManager(storage);
-        this.marketManager.loadAllStocks();
+        this.marketManager = new MarketManager(this, storage);
 
         // PlaceholderAPI
         if (Bukkit.getPluginManager().getPlugin("PlaceholderAPI") != null) {
@@ -54,7 +53,6 @@ public final class DustExchange extends JavaPlugin {
         this.storage.startListening(() -> {
             getServer().getScheduler().runTask(this, () -> {
 
-                this.marketManager.loadAllStocks();
 
                 for (org.bukkit.entity.Player player : getServer().getOnlinePlayers()) {
                     org.bukkit.inventory.InventoryView view = player.getOpenInventory();
@@ -70,7 +68,7 @@ public final class DustExchange extends JavaPlugin {
 
         // ------------- COMMAND -------------
         CommandManager commandManager = new CommandManager(this);
-        commandManager.register(new MarketCommand(marketManager));
+        commandManager.register(new MarketCommand(this, marketManager));
 
         getLogger().info("DustExchange initialise avec " + marketManager.getItems().size() + " items.");
     }

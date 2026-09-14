@@ -1,39 +1,57 @@
 package fr.romain.dustexchange.dustExchange.manager;
 
+import fr.romain.dustexchange.dustExchange.DustExchange;
 import fr.romain.dustexchange.dustExchange.model.MarketItem;
 import fr.romain.dustexchange.dustExchange.storage.MarketStorage;
+import fr.romain.dustexchange.dustExchange.util.ConfigKeys;
 import org.bukkit.Material;
 
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
 
 public class MarketManager {
     private final Map<Material, MarketItem> items = new HashMap<>();
     private final MarketStorage storage;
+    private final DustExchange plugin;
 
-    public MarketManager(MarketStorage storage) {
+    public MarketManager(DustExchange plugin, MarketStorage storage) {
+        this.plugin = plugin;
         this.storage = storage;
-        loadDefaultItems();
+        loadItems();
     }
 
-    private void loadDefaultItems() {
-        registerItem(new MarketItem(Material.DIAMOND, 150.0, 500, 500));
-        registerItem(new MarketItem(Material.GOLD_INGOT, 35.0, 2000, 2000));
-        registerItem(new MarketItem(Material.IRON_INGOT, 10.0, 5000, 5000));
-        registerItem(new MarketItem(Material.NETHERITE_INGOT, 800.0, 50, 50));
-    }
+    public void loadItems() {
+        items.clear();
 
-    public void loadAllStocks() {
-        for (MarketItem item : items.values()) {
-
-            int savedStock = storage.getStock(item.getMaterial());
-
-            if (savedStock != -1) {
-                item.setCurrentStock(savedStock);
-            }
+        if (!plugin.getConfig().isConfigurationSection(ConfigKeys.ITEMS_ROOT)) {
+            plugin.getLogger().info("Aucun item trouvé dans la config.");
+            return;
         }
+
+        for (String key : plugin.getConfig().getConfigurationSection(ConfigKeys.ITEMS_ROOT).getKeys(false)) {
+            Material mat = Material.matchMaterial(key);
+            if (mat == null) continue;
+
+            String path = ConfigKeys.ITEMS_ROOT + "." + key;
+            double basePrice = plugin.getConfig().getDouble(path + "." + ConfigKeys.BASE_PRICE);
+            int baseStock = plugin.getConfig().getInt(path + "." + ConfigKeys.BASE_STOCK);
+
+            MarketItem item = new MarketItem(mat, basePrice, baseStock, baseStock);
+            items.put(mat, item);
+
+            CompletableFuture.supplyAsync(() -> storage.getStock(mat))
+                    .thenAccept(realStock -> {
+                        if (realStock != -999 && realStock >= 0) {
+                            item.setCurrentStock(realStock);
+                        } else if (realStock == -999 || realStock == -1) {
+                            CompletableFuture.runAsync(() -> storage.modifyStock(mat, baseStock));
+                        }
+                    });
+        }
+        plugin.getLogger().info(items.size() + " objets chargés dans le marché.");
     }
 
     public void registerItem(MarketItem item) {
