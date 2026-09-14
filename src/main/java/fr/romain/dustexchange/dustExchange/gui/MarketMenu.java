@@ -3,6 +3,7 @@ package fr.romain.dustexchange.dustExchange.gui;
 import fr.romain.dustexchange.dustExchange.manager.MarketManager;
 import fr.romain.dustexchange.dustExchange.model.MarketItem;
 import fr.romain.dustexchange.dustExchange.util.ItemBuilder;
+import fr.romain.dustexchange.dustExchange.util.MessageUtil;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
 import net.kyori.adventure.text.format.TextDecoration;
@@ -25,7 +26,7 @@ public class MarketMenu implements InventoryHolder {
 
     public MarketMenu(MarketManager marketManager) {
         this.marketManager = marketManager;
-        Component title = Component.text("DustExchange — Bourse", NamedTextColor.DARK_GRAY, TextDecoration.BOLD);
+        Component title = MessageUtil.parse("<dark_gray><bold>DustExchange — Bourse</bold></dark_gray>");
         this.inventory = Bukkit.createInventory(this, 27, title);
         refresh();
     }
@@ -47,18 +48,15 @@ public class MarketMenu implements InventoryHolder {
             if (slot > 16) break;
 
             ItemStack display = new ItemBuilder(item.getMaterial())
-                    .name(Component.text(item.getMaterial().name(), NamedTextColor.GOLD, TextDecoration.BOLD))
+                    .name(MessageUtil.parse("<gold><bold>" + item.getMaterial().name() + "</bold></gold>"))
                     .lore(
                             Component.empty(),
-                            Component.text("Prix d'Achat : ", NamedTextColor.GRAY)
-                                    .append(Component.text(item.getBuyPrice() + " $", NamedTextColor.RED)),
-                            Component.text("Prix de Vente : ", NamedTextColor.GRAY)
-                                    .append(Component.text(item.getSellPrice() + " $", NamedTextColor.GREEN)),
-                            Component.text("Stock global : ", NamedTextColor.GRAY)
-                                    .append(Component.text(item.getCurrentStock() + " unités", NamedTextColor.YELLOW)),
+                            MessageUtil.parse("<gray>Prix d'Achat : <red>" + item.getBuyPrice() + " $</red></gray>"),
+                            MessageUtil.parse("<gray>Prix de Vente : <green>" + item.getSellPrice() + " $</green></gray>"),
+                            MessageUtil.parse("<gray>Stock global : <yellow>" + item.getCurrentStock() + " unités</yellow></gray>"),
                             Component.empty(),
-                            Component.text("▸ Clic GAUCHE pour ACHETER", NamedTextColor.DARK_AQUA),
-                            Component.text("▸ Clic DROIT pour VENDRE", NamedTextColor.DARK_GREEN)
+                            MessageUtil.parse("<dark_aqua>▸ Clic GAUCHE pour ACHETER</dark_aqua>"),
+                            MessageUtil.parse("<dark_green>▸ Clic DROIT pour VENDRE</dark_green>")
                     )
                     .build();
 
@@ -69,14 +67,15 @@ public class MarketMenu implements InventoryHolder {
 
         ItemStack claimBox = new ItemStack(Material.ENDER_CHEST);
         ItemMeta claimMeta = claimBox.getItemMeta();
-        claimMeta.displayName(Component.text("Coffre de Récupération", NamedTextColor.GOLD));
-        claimMeta.lore(java.util.List.of(
-                Component.text("Vos objets perdus ou en attente", NamedTextColor.GRAY),
-                Component.text("sont stockés ici. Cliquez pour", NamedTextColor.GRAY),
-                Component.text("tout récupérer.", NamedTextColor.GRAY)
-        ));
-        claimBox.setItemMeta(claimMeta);
-
+        if (claimMeta != null) {
+            claimMeta.displayName(MessageUtil.parse("<gold>Coffre de Récupération</gold>"));
+            claimMeta.lore(MessageUtil.parseList(
+                    "<gray>Vos objets perdus ou en attente</gray>",
+                    "<gray>sont stockés ici. Cliquez pour</gray>",
+                    "<gray>tout récupérer.</gray>"
+            ));
+            claimBox.setItemMeta(claimMeta);
+        }
         inventory.setItem(GUI_ITEMPICKUP_SLOT, claimBox);
     }
 
