@@ -4,6 +4,7 @@ import fr.romain.dustexchange.dustExchange.DustExchange;
 import fr.romain.dustexchange.dustExchange.model.MarketItem;
 import fr.romain.dustexchange.dustExchange.storage.MarketStorage;
 import fr.romain.dustexchange.dustExchange.util.ItemSerializer;
+import org.bukkit.Bukkit;
 import org.bukkit.inventory.ItemStack;
 
 import java.util.Collections;
@@ -18,24 +19,68 @@ public class MarketManager {
     private final MarketStorage storage;
     private final DustExchange plugin;
 
-    // Le verrou anti-désynchronisation
     private final AtomicInteger syncTaskCounter = new AtomicInteger(0);
+    private volatile boolean isStorageOnline = false;
 
     public MarketManager(DustExchange plugin, MarketStorage storage) {
         this.plugin = plugin;
         this.storage = storage;
-        loadItems();
+
+        // Heartbeat
+        Bukkit.getScheduler().runTaskTimerAsynchronously(plugin, () -> {
+            boolean currentState = storage.isAvailable();
+
+            if (currentState && !isStorageOnline) {
+                isStorageOnline = true;
+                plugin.getLogger().info("Connexion a la base de donnees etablie ! Synchronisation de la bourse...");
+
+                startNetworkListener();
+                loadItems();
+
+            } else if (!currentState && isStorageOnline) {
+                isStorageOnline = false;
+                plugin.getLogger().warning("Connexion a la base de donnees perdue ! Fermeture de la bourse.");
+                items.clear();
+            }
+        }, 0L, 100L);
+    }
+
+    private void startNetworkListener() {
+        storage.startListening(message -> {
+            CompletableFuture<Void> updateTask = null;
+
+            if ("sync_items".equals(message)) {
+                updateTask = loadItems();
+            } else if ("update".equals(message)) {
+                updateTask = refreshOnlyStocks();
+            }
+
+            if (updateTask != null) {
+                updateTask.thenRun(() -> {
+                    Bukkit.getScheduler().runTask(plugin, () -> {
+                        for (org.bukkit.entity.Player player : Bukkit.getOnlinePlayers()) {
+                            if (player.getOpenInventory().getTopInventory().getHolder() instanceof fr.romain.dustexchange.dustExchange.gui.MarketMenu menu) {
+                                menu.refresh();
+                            }
+                        }
+                    });
+                });
+            }
+        });
+    }
+
+    public boolean isStorageAvailable() {
+        return isStorageOnline;
     }
 
     public CompletableFuture<Void> loadItems() {
+        if (!isStorageOnline) return CompletableFuture.completedFuture(null);
+
         int taskId = syncTaskCounter.incrementAndGet();
 
         return CompletableFuture.supplyAsync(() -> storage.getAllItemDefinitions())
                 .thenAccept(definitions -> {
-                    // Si une commande a relancé un loadItems() pendant qu'on téléchargeait, on abandonne
-                    if (syncTaskCounter.get() != taskId) {
-                        return;
-                    }
+                    if (syncTaskCounter.get() != taskId) return;
 
                     Map<String, MarketItem> newItems = new ConcurrentHashMap<>();
 
@@ -89,6 +134,8 @@ public class MarketManager {
     }
 
     public CompletableFuture<Void> refreshOnlyStocks() {
+        if (!isStorageOnline) return CompletableFuture.completedFuture(null);
+
         return CompletableFuture.runAsync(() -> {
             for (MarketItem item : items.values()) {
                 int realStock = storage.getStock(item.getId());

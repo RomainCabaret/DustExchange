@@ -19,6 +19,18 @@ dependencies {
     compileOnly("me.clip:placeholderapi:2.12.3")
 
     implementation("redis.clients:jedis:8.0.1")
+
+    // --- Tests Unitaires ---
+
+    testImplementation("io.papermc.paper:paper-api:1.21.8-R0.1-SNAPSHOT")
+    testImplementation("com.github.MilkBowl:VaultAPI:1.7") {
+        exclude(group = "org.bukkit", module = "bukkit")
+    }
+
+    testImplementation("org.junit.jupiter:junit-jupiter:6.1.3")
+    testRuntimeOnly("org.junit.platform:junit-platform-launcher")
+    testImplementation("org.mockito:mockito-core:5.23.0")
+    testImplementation("org.mockito:mockito-junit-jupiter:5.23.0")
 }
 
 
@@ -42,5 +54,8 @@ tasks {
         filesMatching("plugin.yml") {
             expand(props)
         }
+    }
+    test {
+        useJUnitPlatform()
     }
 }

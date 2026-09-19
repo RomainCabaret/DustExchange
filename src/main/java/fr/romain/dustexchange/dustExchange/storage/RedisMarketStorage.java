@@ -72,10 +72,9 @@ public class RedisMarketStorage implements MarketStorage {
     }
 
     @Override
-    public void saveItemDefinition(String id, ItemStack item, double basePrice, int baseStock, int slot, boolean enabled) {
+    public void saveItemDefinition(String id, String base64Item, double basePrice, int baseStock, int slot, boolean enabled) {
         try {
-            String base64 = ItemSerializer.toBase64(item);
-            String data = basePrice + ";" + baseStock + ";" + slot + ";" + enabled + ";" + base64;
+            String data = basePrice + ";" + baseStock + ";" + slot + ";" + enabled + ";" + base64Item;
             client.hset(REDIS_ITEMS_KEY, id, data);
             client.publish(CHANNEL, "sync_items");
         } catch (Exception e) {
@@ -106,6 +105,14 @@ public class RedisMarketStorage implements MarketStorage {
 
     @Override
     public void startListening(Consumer<String> onMessage) {
+        // On purge l'ancien thread s'il existe
+        if (jedisPubSub != null && jedisPubSub.isSubscribed()) {
+            try { jedisPubSub.unsubscribe(); } catch (Exception ignored) {}
+        }
+        if (subscriberThread != null && subscriberThread.isAlive()) {
+            subscriberThread.interrupt();
+        }
+
         this.jedisPubSub = new JedisPubSub() {
             @Override
             public void onMessage(String channel, String message) {
@@ -119,7 +126,7 @@ public class RedisMarketStorage implements MarketStorage {
             try {
                 client.subscribe(jedisPubSub, CHANNEL);
             } catch (Exception e) {
-                logger.severe("Erreur Pub/Sub : " + e.getMessage());
+                logger.warning("PubSub deconnecte : " + e.getMessage());
             }
         });
         this.subscriberThread.start();
@@ -166,6 +173,15 @@ public class RedisMarketStorage implements MarketStorage {
             client.hdel(CLAIMS_PREFIX + uuid.toString(), id);
         } catch (Exception e) {
             logger.severe("Erreur Redis (RemoveClaim) : " + e.getMessage());
+        }
+    }
+    @Override
+    public boolean isAvailable() {
+        try {
+            String response = client.ping();
+            return response != null && response.equalsIgnoreCase("PONG");
+        } catch (Exception e) {
+            return false;
         }
     }
 }

@@ -19,7 +19,7 @@ public interface MarketStorage {
     void removePendingClaim(UUID uuid, String id);
 
     void deleteStock(String id);
-    void saveItemDefinition(String id, ItemStack item, double basePrice, int baseStock, int slot, boolean enabled);
-    void removeItemDefinition(String id);
+    void saveItemDefinition(String id, String base64Item, double basePrice, int baseStock, int slot, boolean enabled);    void removeItemDefinition(String id);
     Map<String, String> getAllItemDefinitions();
+    boolean isAvailable();
 }

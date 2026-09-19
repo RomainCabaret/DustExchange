@@ -8,6 +8,7 @@ import fr.romain.dustexchange.dustExchange.DustExchange;
 import fr.romain.dustexchange.dustExchange.gui.MarketMenu;
 import fr.romain.dustexchange.dustExchange.manager.MarketManager;
 import fr.romain.dustexchange.dustExchange.model.MarketItem;
+import fr.romain.dustexchange.dustExchange.util.ItemSerializer;
 import fr.romain.dustexchange.dustExchange.util.MessageUtil;
 import fr.romain.dustexchange.dustExchange.util.PermissionKeys;
 import io.papermc.paper.command.brigadier.CommandSourceStack;
@@ -36,6 +37,10 @@ public class MarketCommand implements BaseCommand {
         return Commands.literal(ROOT_MARKET_CMD)
                 .executes(context -> {
                     if (context.getSource().getSender() instanceof Player player) {
+                        if (!marketManager.isStorageAvailable()) {
+                            MessageUtil.send(player, "<red>La bourse est actuellement inaccessible. Problème réseau.</red>");
+                            return Command.SINGLE_SUCCESS;
+                        }
                         new MarketMenu(marketManager).open(player);
                     }
                     return Command.SINGLE_SUCCESS;
@@ -68,10 +73,12 @@ public class MarketCommand implements BaseCommand {
 
                                                     String uniqueId = UUID.randomUUID().toString();
                                                     ItemStack savedItem = handItem.clone();
-                                                    savedItem.setAmount(1); // Force la quantité à 1 pour éviter un accident
+                                                    savedItem.setAmount(1);
+
+                                                    String base64Item = ItemSerializer.toBase64(savedItem);
 
                                                     CompletableFuture.runAsync(() -> {
-                                                        marketManager.getStorage().saveItemDefinition(uniqueId, savedItem, basePrice, baseStock, slot, true);
+                                                        marketManager.getStorage().saveItemDefinition(uniqueId, base64Item, basePrice, baseStock, slot, true);
                                                         marketManager.getStorage().modifyStock(uniqueId, baseStock);
                                                     });
 
@@ -102,7 +109,6 @@ public class MarketCommand implements BaseCommand {
                                     String id = item.getId();
 
                                     CompletableFuture.runAsync(() -> {
-                                        // Cette méthode nettoie l'item, le stock et alerte tout le réseau
                                         marketManager.getStorage().removeItemDefinition(id);
                                     });
 
@@ -130,9 +136,11 @@ public class MarketCommand implements BaseCommand {
                                     MarketItem item = optionalItem.get();
                                     boolean newState = !item.isEnabled();
 
+                                    String base64Item = ItemSerializer.toBase64(item.getItemStack());
+
                                     CompletableFuture.runAsync(() -> {
                                         marketManager.getStorage().saveItemDefinition(
-                                                item.getId(), item.getItemStack(), item.getBasePrice(), item.getBaseStock(), item.getSlot(), newState
+                                                item.getId(), base64Item, item.getBasePrice(), item.getBaseStock(), item.getSlot(), newState
                                         );
                                     });
 

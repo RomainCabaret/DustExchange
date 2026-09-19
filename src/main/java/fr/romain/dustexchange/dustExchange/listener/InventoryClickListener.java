@@ -52,6 +52,11 @@ public class InventoryClickListener implements Listener {
         if (!(event.getWhoClicked() instanceof Player player)) {
             return;
         }
+        if (!marketManager.isStorageAvailable()) {
+            player.closeInventory();
+            MessageUtil.send(player, "<red>La connexion à la bourse a été perdue.</red>");
+            return;
+        }
 
         if (event.getSlot() == MarketMenu.GUI_ITEMPICKUP_SLOT && clicked.getType() == Material.ENDER_CHEST) {
             handleClaimClick(player);
@@ -124,7 +129,7 @@ public class InventoryClickListener implements Listener {
                     }
 
                     if (economyManager.withdraw(player, truePrice)) {
-                        Map<Integer, ItemStack> leftovers = player.getInventory().addItem(item.getItemStack());
+                        Map<Integer, ItemStack> leftovers = player.getInventory().addItem(item.getItemStack().clone());
 
                         if (!leftovers.isEmpty()) {
                             CompletableFuture.runAsync(() -> marketManager.getStorage().addPendingClaim(uuid, item.getId(), 1));
@@ -134,6 +139,7 @@ public class InventoryClickListener implements Listener {
                         MessageUtil.send(player, "<green>Achat validé pour <yellow>" + truePrice + " $</yellow></green>");
                         item.setCurrentStock(newStock.intValue());
                         menu.refresh();
+                        player.updateInventory();
                     } else {
                         CompletableFuture.runAsync(() -> marketManager.getStorage().modifyStock(item.getId(), 1));
                         MessageUtil.send(player, "<red>Erreur système lors du paiement.</red>");
@@ -158,7 +164,7 @@ public class InventoryClickListener implements Listener {
             return;
         }
 
-        ItemStack itemToSell = item.getItemStack();
+        ItemStack itemToSell = item.getItemStack().clone();
 
         if (!player.getInventory().containsAtLeast(itemToSell, 1)) {
             MessageUtil.send(player, "<red>Vous ne possédez pas cet objet !</red>");
@@ -201,6 +207,7 @@ public class InventoryClickListener implements Listener {
                         MessageUtil.send(player, "<green>Vente validée pour <yellow>" + truePrice + " $</yellow></green>");
                         item.setCurrentStock(newStock.intValue());
                         menu.refresh();
+                        player.updateInventory();
                     } else {
                         CompletableFuture.runAsync(() -> marketManager.getStorage().modifyStock(item.getId(), -1));
                         refundItem(player, uuid, item);
@@ -235,80 +242,90 @@ public class InventoryClickListener implements Listener {
             return;
         }
 
-        CompletableFuture.supplyAsync(() -> marketManager.getStorage().getPendingClaims(uuid))
-                .thenAccept(claims -> {
-                    Bukkit.getScheduler().runTask(plugin, () -> {
-                        try {
-                            if (!player.isOnline()) return;
+        CompletableFuture.supplyAsync(() -> {
+            Map<String, String> claims = marketManager.getStorage().getPendingClaims(uuid);
 
-                            if (claims == null || claims.isEmpty()) {
-                                MessageUtil.send(player, "<red>Votre coffre est vide.</red>");
-                                return;
-                            }
+            if (claims != null && !claims.isEmpty()) {
+                for (String id : claims.keySet()) {
+                    marketManager.getStorage().removePendingClaim(uuid, id);
+                }
+            }
+            return claims;
+        }).thenAccept(claims -> {
+            Bukkit.getScheduler().runTask(plugin, () -> {
+                try {
+                    if (claims == null || claims.isEmpty()) {
+                        if (player.isOnline()) MessageUtil.send(player, "<red>Votre coffre est vide.</red>");
+                        return;
+                    }
 
-                            boolean inventoryFull = false;
-
+                    if (!player.isOnline()) {
+                        CompletableFuture.runAsync(() -> {
                             for (Map.Entry<String, String> entry : claims.entrySet()) {
-                                String id = entry.getKey();
-
-                                int totalAmount = Integer.parseInt(entry.getValue());
-                                if (totalAmount <= 0) {
-                                    CompletableFuture.runAsync(() -> marketManager.getStorage().removePendingClaim(uuid, id));
-                                    continue;
-                                }
-
-                                MarketItem mItem = marketManager.getItem(id).orElse(null);
-
-                                if (mItem == null) {
-                                    CompletableFuture.runAsync(() -> marketManager.getStorage().removePendingClaim(uuid, id));
-                                    continue;
-                                }
-
-                                ItemStack template = mItem.getItemStack();
-                                int amountGiven = 0;
-
-                                // Ajout sécurisé 1 par 1 pour évite les crashs de limites de stacks Bukkit
-                                for (int i = 0; i < totalAmount; i++) {
-                                    if (!player.getInventory().addItem(template.clone()).isEmpty()) {
-                                        inventoryFull = true;
-                                        break;
-                                    }
-                                    amountGiven++;
-                                }
-
-                                if (amountGiven == totalAmount) {
-                                    CompletableFuture.runAsync(() -> marketManager.getStorage().removePendingClaim(uuid, id));
-                                } else if (amountGiven > 0) {
-                                    int finalAmountGiven = amountGiven;
-                                    CompletableFuture.runAsync(() -> marketManager.getStorage().addPendingClaim(uuid, id, -finalAmountGiven));
-                                }
+                                marketManager.getStorage().addPendingClaim(uuid, entry.getKey(), Integer.parseInt(entry.getValue()));
                             }
+                        });
+                        return;
+                    }
 
-                            if (inventoryFull) {
-                                MessageUtil.send(player, "<red>Votre inventaire est plein ! Videz-le pour récupérer le reste.</red>");
-                            } else {
-                                MessageUtil.send(player, "<green>Tous vos objets ont été récupérés !</green>");
+                    boolean inventoryFull = false;
+
+                    for (Map.Entry<String, String> entry : claims.entrySet()) {
+                        String id = entry.getKey();
+                        int totalAmount = Integer.parseInt(entry.getValue());
+
+                        if (totalAmount <= 0) continue;
+
+                        MarketItem mItem = marketManager.getItem(id).orElse(null);
+
+                        if (mItem == null) continue;
+
+                        ItemStack template = mItem.getItemStack();
+                        int amountGiven = 0;
+
+                        for (int i = 0; i < totalAmount; i++) {
+                            if (!player.getInventory().addItem(template.clone()).isEmpty()) {
+                                inventoryFull = true;
+                                break;
                             }
-
-                        } finally {
-                            processingPlayers.remove(uuid);
+                            amountGiven++;
                         }
-                    });
-                }).exceptionally(ex -> {
-                    plugin.getLogger().severe("Erreur asynchrone (Claim) : " + ex.getMessage());
+
+                        int leftovers = totalAmount - amountGiven;
+                        if (leftovers > 0) {
+                            CompletableFuture.runAsync(() -> marketManager.getStorage().addPendingClaim(uuid, id, leftovers));
+                        }
+                    }
+
+                    if (inventoryFull) {
+                        MessageUtil.send(player, "<red>Votre inventaire est plein ! Videz-le pour récupérer le reste.</red>");
+                    } else {
+                        MessageUtil.send(player, "<green>Tous vos objets ont été récupérés !</green>");
+                    }
+                    player.updateInventory();
+
+                } finally {
                     processingPlayers.remove(uuid);
-                    if (player.isOnline()) MessageUtil.sendActionBar(player, "<red>Erreur lors de la lecture du coffre.</red>");
-                    return null;
-                });
+                }
+            });
+        }).exceptionally(ex -> {
+            plugin.getLogger().severe("Erreur asynchrone (Claim) : " + ex.getMessage());
+            Bukkit.getScheduler().runTask(plugin, () -> {
+                if (player.isOnline()) MessageUtil.sendActionBar(player, "<red>Erreur réseau lors de la lecture du coffre.</red>");
+                processingPlayers.remove(uuid);
+            });
+            return null;
+        });
     }
 
     private void refundItem(Player player, UUID uuid, MarketItem item) {
-        ItemStack itemToRefund = item.getItemStack();
+        ItemStack itemToRefund = item.getItemStack().clone();
         Map<Integer, ItemStack> leftovers = player.getInventory().addItem(itemToRefund);
 
         if (!leftovers.isEmpty()) {
             CompletableFuture.runAsync(() -> marketManager.getStorage().addPendingClaim(uuid, item.getId(), 1));
             MessageUtil.send(player, "<gold>Inventaire plein ! L'objet refusé a été placé dans votre coffre (/market).</gold>");
         }
+        player.updateInventory();
     }
 }
