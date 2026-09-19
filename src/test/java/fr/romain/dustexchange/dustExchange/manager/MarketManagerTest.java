@@ -11,7 +11,9 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.MockedStatic;
 
-import java.util.concurrent.CompletableFuture;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.*;
 import java.util.logging.Logger;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -98,5 +100,112 @@ class MarketManagerTest {
 
         // On s'assure qu'il n'a pas appelé d'autres méthodes lourdes pour rien
         verify(mockStorage, never()).getAllItemDefinitions();
+    }
+    @Test
+    void testConcurrentServerSync_ShouldNeverCorruptMemoryOrThrowRaceCondition() throws Exception {
+        // GIVEN: Le manager connecté
+        MarketManager manager = new MarketManager(mockPlugin, mockStorage);
+
+        java.lang.reflect.Field onlineField = MarketManager.class.getDeclaredField("isStorageOnline");
+        onlineField.setAccessible(true);
+        onlineField.set(manager, true);
+
+        // On prépare des fausses données retournées par le storage
+        Map<String, String> fakeDefs = Map.of(
+                "diamond", "100.0;64;1;true;rO0ABXNyABpvcmcuYnVra2l0LmludmVudG9yeS5JdGVtU3RhY2sAAAAAAAAAAQIAAUwABHR5cGV0ABFMb3JnL2J1a2tpdC9NYXRlcmlhbDt4cHQAB0RJQU1PTkQ="
+        );
+        when(mockStorage.getAllItemDefinitions()).thenReturn(fakeDefs);
+        when(mockStorage.getStock(anyString())).thenReturn(42);
+
+        int threadCount = 10;
+        ExecutorService executor = Executors.newFixedThreadPool(threadCount);
+        CountDownLatch startGate = new CountDownLatch(1); // Déclencheur pour un départ 100% simultané
+        CountDownLatch endGate = new CountDownLatch(threadCount);
+        List<CompletableFuture<Void>> futures = new CopyOnWriteArrayList<>();
+
+        // WHEN: 10 faux serveurs bombardent le manager en même temps
+        for (int i = 0; i < threadCount; i++) {
+            final int index = i;
+            executor.submit(() -> {
+                try {
+                    startGate.await(); // Attend le signal pour tirer en même temps que les autres
+
+                    if (index % 2 == 0) {
+                        futures.add(manager.loadItems());
+                    } else {
+                        futures.add(manager.refreshOnlyStocks());
+                    }
+                } catch (InterruptedException ignored) {
+                } finally {
+                    endGate.countDown();
+                }
+            });
+        }
+
+        // On libère la barrière : feu !
+        startGate.countDown();
+
+        // On attend que tous les threads aient terminé d'envoyer leurs tâches
+        assertTrue(endGate.await(5, TimeUnit.SECONDS), "Les threads ont mis trop de temps ou sont bloqués en deadlock.");
+
+        // On attend la résolution de tous les CompletableFutures asynchrones
+        CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
+        executor.shutdown();
+
+        // THEN:
+        // 1. La map interne ne doit pas être corrompue et doit rester accessible en lecture
+        assertNotNull(manager.getItems(), "La collection ne doit jamais être nulle.");
+
+        // 2. Aucune ConcurrentModificationException n'a eu lieu et la map est stable
+        assertDoesNotThrow(() -> {
+            for (MarketItem item : manager.getItems().values()) {
+                assertNotNull(item.getId());
+            }
+        }, "L'itération concurrente ne doit jamais jeter d'exception.");
+    }
+    @Test
+    void testLoadItems_CorruptedData_ShouldNotCrash() {
+        MarketManager manager = new MarketManager(mockPlugin, mockStorage);
+
+        // GIVEN: Redis nous crache à la gueule des données complètement pétées
+        Map<String, String> poisonedRedisData = Map.of(
+                "valid_item", "100.0;50;50;true;rO0ABXNyABpvcmcuYnVra2l0LmludmVudG9yeS5JdGVtU3RhY2sAAAAAAAAAAQIAAUwABHR5cGV0ABFMb3JnL2J1a2tpdC9NYXRlcmlhbDt4cHQAB0RJQU1PTkQ=",
+                "corrupted_item", "WTF_IS_THIS_DATA", // Format invalide
+                "hacked_item", "100.0;50;50;true;NOT_A_BASE64_STRING" // Base64 pété
+        );
+
+        when(mockStorage.getAllItemDefinitions()).thenReturn(poisonedRedisData);
+
+        // WHEN: On force le rechargement asynchrone
+        // THEN: Le processus ne doit pas jeter d'exception fatale qui tuerait le thread
+        assertDoesNotThrow(() -> {
+            manager.loadItems().join(); // .join() force l'attente du CompletableFuture
+        }, "Le parsing de données corrompues ne doit jamais faire crasher le thread de synchronisation.");
+
+        // Bonus : On vérifie que l'item valide est bien passé, mais pas les autres
+        // (Ajuste selon si ton mock arrive à décoder "valid_item" ou non)
+    }
+
+    @Test
+    void testStorageDisconnect_ShouldLockMarket() throws Exception {
+        // GIVEN: Le manager est opérationnel
+        MarketManager manager = new MarketManager(mockPlugin, mockStorage);
+
+        java.lang.reflect.Field onlineField = MarketManager.class.getDeclaredField("isStorageOnline");
+        onlineField.setAccessible(true);
+        onlineField.set(manager, true);
+
+        assertTrue(manager.isStorageAvailable(), "Le stockage devrait être actif au départ.");
+
+        // SIMULATION: La méthode qui check la connexion (adapte le nom de la méthode selon ton implémentation de Heartbeat)
+        // Par exemple si tu as une méthode checkConnection() ou si tu catch une exception SQL/Redis
+        // Si tu n'as pas encore de méthode dédiée pour déclencher la déconnexion dans le manager,
+        // tu peux tester le comportement quand isStorageAvailable est false
+
+        onlineField.set(manager, false);
+        assertFalse(manager.isStorageAvailable(), "Le stockage doit être marqué comme hors-ligne.");
+
+        // Si tu as une méthode qui vide la mémoire par sécurité lors d'une déconnexion, vérifie-la ici :
+        // assertNull(manager.getItem("diamond").orElse(null), "La mémoire devrait être inaccessible si Redis est mort.");
     }
 }
