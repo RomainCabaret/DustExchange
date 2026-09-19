@@ -9,6 +9,28 @@ DustExchange est un plugin d'économie et de marché asynchrone pour les serveur
 * Un serveur Redis fonctionnel.
 * Un plugin d'économie compatible Vault.
 
+## Installation
+
+1. Téléchargez le fichier `.jar` de la dernière version.
+2. Placez le fichier dans le dossier `plugins/` de votre serveur.
+3. Démarrez le serveur pour générer les fichiers de configuration.
+4. Renseignez les identifiants de votre base de données Redis dans le fichier `config.yml`.
+5. Redémarrez le serveur.
+
+## Commandes et Permissions
+
+### Joueurs
+* `/market` (alias : `/bourse`) : Ouvre l'interface graphique du marché et la Claim Box.
+    * Permission : `dustexchange.useDustExchange`
+
+### Administration
+*Permission requise : `dustexchange.admin`*
+
+* `/market add <prix_base> <stock_base> <slot>` : Ajoute l'objet tenu en main principale au marché. Le prix et le stock de base définissent le point d'équilibre de l'inflation.
+* `/market remove <slot>` : Supprime définitivement l'objet présent au slot indiqué (supprime aussi son stock dynamique de Redis).
+* `/market toggle <slot>` : Active ou désactive instantanément les transactions sur un objet spécifique (utile pour geler le marché d'un item sans le supprimer).
+
+
 ## Architecture Technique
 
 Le code est structuré pour garantir l'intégrité des données sans impacter la boucle principale du serveur :
@@ -21,20 +43,14 @@ Les modifications de stock et la lecture des données depuis Redis sont exécut�
 
 ## Intégration PlaceholderAPI (PAPI)
 
-DustExchange expose les données du marché en temps réel pour une intégration native dans vos scoreboards, hologrammes ou menus externes. 
+DustExchange expose les données du marché en temps réel pour une intégration native dans vos scoreboards, hologrammes ou menus externes. Les objets sont ciblés par leur numéro de **slot** dans l'interface.
 
-* `%dustexchange_price_buy_<item>%`: Retourne le prix d'achat actuel d'un matériau.
-* `%dustexchange_price_sell_<item>%` : Retourne le prix de rachat actuel.
-* `%dustexchange_stock_<item>%` : Retourne le volume de stock disponible.
-* `%dustexchange_pending_claims%` : Retourne le nombre d'objets en attente dans la Claim Box du joueur.
+* `%dustexchange_buyprice_<slot>%` : Retourne le prix d'achat actuel de l'objet.
+* `%dustexchange_sellprice_<slot>%` : Retourne le prix de rachat actuel.
+* `%dustexchange_stock_<slot>%` : Retourne le volume de stock disponible.
 
-## Installation
+*Exemple : `%dustexchange_buyprice_10%` affichera le prix de l'objet situé au slot 10.*
 
-1. Téléchargez le fichier `.jar` de la dernière version.
-2. Placez le fichier dans le dossier `plugins/` de votre serveur.
-3. Démarrez le serveur pour générer les fichiers de configuration.
-4. Renseignez les identifiants de votre base de données Redis dans le fichier `config.yml`.
-5. Redémarrez le serveur.
 
 ## Compilation depuis les sources
 
@@ -45,8 +61,3 @@ Clonez ce dépôt, puis exécutez la commande suivante :
 * Sur Windows : exécutez `gradlew build`. 
 
 Une fois l'opération terminée, le fichier `.jar` compilé se trouvera dans le dossier `build/libs/`.
-
-## Commandes et Permissions
-
-* `/market` : Ouvre l'interface graphique du marché et permet d'accéder à l'Ender Chest de récupération (Claim Box).
-    * Permission par défaut : `dustexchange.useDustExchange`
