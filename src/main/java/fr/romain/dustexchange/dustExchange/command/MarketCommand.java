@@ -8,15 +8,16 @@ import fr.romain.dustexchange.dustExchange.DustExchange;
 import fr.romain.dustexchange.dustExchange.gui.MarketMenu;
 import fr.romain.dustexchange.dustExchange.manager.MarketManager;
 import fr.romain.dustexchange.dustExchange.model.MarketItem;
-import fr.romain.dustexchange.dustExchange.util.ConfigKeys;
 import fr.romain.dustexchange.dustExchange.util.MessageUtil;
+import fr.romain.dustexchange.dustExchange.util.PermissionKeys;
 import io.papermc.paper.command.brigadier.CommandSourceStack;
 import io.papermc.paper.command.brigadier.Commands;
-import org.bukkit.Material;
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.ItemStack;
 
 import java.util.List;
+import java.util.Optional;
+import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 
 public class MarketCommand implements BaseCommand {
@@ -40,63 +41,105 @@ public class MarketCommand implements BaseCommand {
                     return Command.SINGLE_SUCCESS;
                 })
 
-                // Sous-commande : /market add <base_price> <base_stock> <0-53>
+                // /market add <base_price> <base_stock> <slot>
                 .then(Commands.literal("add")
-                        .requires(source -> source.getSender().hasPermission("dustexchange.admin"))
+                        .requires(source -> source.getSender().hasPermission(PermissionKeys.MARKET_ADMIN))
                         .then(Commands.argument("base_price", DoubleArgumentType.doubleArg(0.1))
                                 .then(Commands.argument("base_stock", IntegerArgumentType.integer(1))
-                                        .then(Commands.argument("slot", IntegerArgumentType.integer(0, 53))
+                                        .then(Commands.argument("slot", IntegerArgumentType.integer(0, MarketMenu.GUI_ITEMPICKUP_SLOT-1))
                                                 .executes(context -> {
-                                                    if (!(context.getSource().getSender() instanceof Player player)) {
-                                                        context.getSource().getSender().sendMessage("Seul un joueur peut faire ça.");
-                                                        return Command.SINGLE_SUCCESS;
-                                                    }
+                                                    if (!(context.getSource().getSender() instanceof Player player)) return Command.SINGLE_SUCCESS;
 
                                                     ItemStack handItem = player.getInventory().getItemInMainHand();
-                                                    if (handItem.getType().isAir()) {
+                                                    if (handItem.isEmpty()) {
                                                         MessageUtil.send(player, "<red>Tu dois tenir un objet dans ta main.</red>");
                                                         return Command.SINGLE_SUCCESS;
                                                     }
 
-                                                    Material mat = handItem.getType();
-                                                    if (marketManager.getItem(mat).isPresent()) {
-                                                        MessageUtil.send(player, "<red>Cet objet est déjà sur le marché !</red>");
+                                                    int slot = IntegerArgumentType.getInteger(context, "slot");
+
+                                                    if (marketManager.getItemBySlot(slot).isPresent()) {
+                                                        MessageUtil.send(player, "<red>Le slot " + slot + " est déjà occupé !</red>");
                                                         return Command.SINGLE_SUCCESS;
                                                     }
 
                                                     double basePrice = DoubleArgumentType.getDouble(context, "base_price");
                                                     int baseStock = IntegerArgumentType.getInteger(context, "base_stock");
-                                                    int slot = IntegerArgumentType.getInteger(context, "slot");
 
-                                                    if (plugin.getConfig().isConfigurationSection(ConfigKeys.ITEMS_ROOT)) {
-                                                        for (String key : plugin.getConfig().getConfigurationSection(ConfigKeys.ITEMS_ROOT).getKeys(false)) {
-                                                            int existingSlot = plugin.getConfig().getInt(ConfigKeys.ITEMS_ROOT + "." + key + "." + ConfigKeys.SLOT);
-                                                            if (existingSlot == slot) {
-                                                                MessageUtil.send(player, "<red>Le slot " + slot + " est déjà occupé par " + key + " !</red>");
-                                                                return Command.SINGLE_SUCCESS;
-                                                            }
-                                                        }
-                                                    }
-
-                                                    String path = ConfigKeys.ITEMS_ROOT + "." + mat.name();
-                                                    plugin.getConfig().set(path + "." + ConfigKeys.SLOT, slot);
-                                                    plugin.getConfig().set(path + "." + ConfigKeys.BASE_PRICE, basePrice);
-                                                    plugin.getConfig().set(path + "." + ConfigKeys.BASE_STOCK, baseStock);
-                                                    plugin.saveConfig();
+                                                    String uniqueId = UUID.randomUUID().toString();
+                                                    ItemStack savedItem = handItem.clone();
+                                                    savedItem.setAmount(1); // Force la quantité à 1 pour éviter un accident
 
                                                     CompletableFuture.runAsync(() -> {
-                                                        marketManager.getStorage().modifyStock(mat, baseStock);
+                                                        marketManager.getStorage().saveItemDefinition(uniqueId, savedItem, basePrice, baseStock, slot, true);
+                                                        marketManager.getStorage().modifyStock(uniqueId, baseStock);
                                                     });
 
-                                                    MarketItem newItem = new MarketItem(mat, basePrice, baseStock, baseStock);
-                                                    marketManager.registerItem(newItem);
-
-                                                    MessageUtil.send(player, "<green>Objet <gold>" + mat.name() + "</gold> ajouté au slot <yellow>" + slot + "</yellow> !</green>");
-
+                                                    MessageUtil.send(player, "<green>Objet poussé vers la bourse (Slot <yellow>" + slot + "</yellow>) !</green>");
                                                     return Command.SINGLE_SUCCESS;
                                                 })
                                         )
                                 )
+                        )
+                )
+
+                // /market remove <slot>
+                .then(Commands.literal("remove")
+                        .requires(source -> source.getSender().hasPermission(PermissionKeys.MARKET_ADMIN))
+                        .then(Commands.argument("slot", IntegerArgumentType.integer(0))
+                                .executes(context -> {
+                                    if (!(context.getSource().getSender() instanceof Player player)) return Command.SINGLE_SUCCESS;
+
+                                    int slot = IntegerArgumentType.getInteger(context, "slot");
+                                    Optional<MarketItem> optionalItem = marketManager.getItemBySlot(slot);
+
+                                    if (optionalItem.isEmpty()) {
+                                        MessageUtil.send(player, "<red>Aucun objet trouvé au slot " + slot + ".</red>");
+                                        return Command.SINGLE_SUCCESS;
+                                    }
+
+                                    MarketItem item = optionalItem.get();
+                                    String id = item.getId();
+
+                                    CompletableFuture.runAsync(() -> {
+                                        // Cette méthode nettoie l'item, le stock et alerte tout le réseau
+                                        marketManager.getStorage().removeItemDefinition(id);
+                                    });
+
+                                    MessageUtil.send(player, "<green>Demande de retrait envoyée pour le slot " + slot + ".</green>");
+                                    return Command.SINGLE_SUCCESS;
+                                })
+                        )
+                )
+
+                // /market toggle <slot>
+                .then(Commands.literal("toggle")
+                        .requires(source -> source.getSender().hasPermission(PermissionKeys.MARKET_ADMIN))
+                        .then(Commands.argument("slot", IntegerArgumentType.integer(0))
+                                .executes(context -> {
+                                    if (!(context.getSource().getSender() instanceof Player player)) return Command.SINGLE_SUCCESS;
+
+                                    int slot = IntegerArgumentType.getInteger(context, "slot");
+                                    Optional<MarketItem> optionalItem = marketManager.getItemBySlot(slot);
+
+                                    if (optionalItem.isEmpty()) {
+                                        MessageUtil.send(player, "<red>Aucun objet trouvé au slot " + slot + ".</red>");
+                                        return Command.SINGLE_SUCCESS;
+                                    }
+
+                                    MarketItem item = optionalItem.get();
+                                    boolean newState = !item.isEnabled();
+
+                                    CompletableFuture.runAsync(() -> {
+                                        marketManager.getStorage().saveItemDefinition(
+                                                item.getId(), item.getItemStack(), item.getBasePrice(), item.getBaseStock(), item.getSlot(), newState
+                                        );
+                                    });
+
+                                    String stateMsg = newState ? "<green>ACTIVÉ</green>" : "<red>DÉSACTIVÉ</red>";
+                                    MessageUtil.send(player, "<gray>Le marché du slot " + slot + " passe en mode " + stateMsg + ".</gray>");
+                                    return Command.SINGLE_SUCCESS;
+                                })
                         )
                 );
     }

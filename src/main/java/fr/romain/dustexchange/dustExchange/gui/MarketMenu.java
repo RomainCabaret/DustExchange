@@ -5,8 +5,6 @@ import fr.romain.dustexchange.dustExchange.model.MarketItem;
 import fr.romain.dustexchange.dustExchange.util.ItemBuilder;
 import fr.romain.dustexchange.dustExchange.util.MessageUtil;
 import net.kyori.adventure.text.Component;
-import net.kyori.adventure.text.format.NamedTextColor;
-import net.kyori.adventure.text.format.TextDecoration;
 import org.bukkit.Bukkit;
 import org.bukkit.Material;
 import org.bukkit.entity.Player;
@@ -16,10 +14,9 @@ import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
 import org.jetbrains.annotations.NotNull;
 
-import java.awt.*;
-
 public class MarketMenu implements InventoryHolder {
-    public static final int GUI_ITEMPICKUP_SLOT = 26;
+    public static final int GUI_MAX_SIZE = 54;
+    public static final int GUI_ITEMPICKUP_SLOT = GUI_MAX_SIZE-1;
 
     private final Inventory inventory;
     private final MarketManager marketManager;
@@ -27,7 +24,7 @@ public class MarketMenu implements InventoryHolder {
     public MarketMenu(MarketManager marketManager) {
         this.marketManager = marketManager;
         Component title = MessageUtil.parse("<dark_gray><bold>DustExchange — Bourse</bold></dark_gray>");
-        this.inventory = Bukkit.createInventory(this, 27, title);
+        this.inventory = Bukkit.createInventory(this, GUI_MAX_SIZE, title);
         refresh();
     }
 
@@ -43,28 +40,49 @@ public class MarketMenu implements InventoryHolder {
         }
 
         // --------------- FILL MARKET ITEM ---------------
-        int slot = 10;
         for (MarketItem item : marketManager.getItems().values()) {
-            if (slot > 16) break;
+            int slot = item.getSlot();
 
-            ItemStack display = new ItemBuilder(item.getMaterial())
-                    .name(MessageUtil.parse("<gold><bold>" + item.getMaterial().name() + "</bold></gold>"))
-                    .lore(
-                            Component.empty(),
-                            MessageUtil.parse("<gray>Prix d'Achat : <red>" + item.getBuyPrice() + " $</red></gray>"),
-                            MessageUtil.parse("<gray>Prix de Vente : <green>" + item.getSellPrice() + " $</green></gray>"),
-                            MessageUtil.parse("<gray>Stock global : <yellow>" + item.getCurrentStock() + " unités</yellow></gray>"),
-                            Component.empty(),
-                            MessageUtil.parse("<dark_aqua>▸ Clic GAUCHE pour ACHETER</dark_aqua>"),
-                            MessageUtil.parse("<dark_green>▸ Clic DROIT pour VENDRE</dark_green>")
-                    )
-                    .build();
+            if (slot < 0 || slot >= inventory.getSize() || slot == GUI_ITEMPICKUP_SLOT) continue;
 
-            inventory.setItem(slot++, display);
+            ItemStack originalItem = item.getItemStack();
+            ItemBuilder builder;
+
+            if (item.isEnabled()) {
+                builder = new ItemBuilder(originalItem);
+            } else {
+                builder = new ItemBuilder(Material.BARRIER);
+            }
+
+            if (!originalItem.hasItemMeta() || !originalItem.getItemMeta().hasDisplayName()) {
+                builder.name(MessageUtil.parse("<gold><bold>" + originalItem.getType().name() + "</bold></gold>"));
+            } else if (!item.isEnabled()) {
+                builder.name(originalItem.getItemMeta().displayName());
+            }
+
+            if (!item.isEnabled()) {
+                builder.lore(
+                        Component.empty(),
+                        MessageUtil.parse("<red><bold> MARCHÉ SUSPENDU </bold></red>"),
+                        MessageUtil.parse("<gray>Les transactions sur cet</gray>"),
+                        MessageUtil.parse("<gray>objet sont bloquées.</gray>")
+                );
+            } else {
+                builder.lore(
+                        Component.empty(),
+                        MessageUtil.parse("<gray>Prix d'Achat : <red>" + item.getBuyPrice() + " $</red></gray>"),
+                        MessageUtil.parse("<gray>Prix de Vente : <green>" + item.getSellPrice() + " $</green></gray>"),
+                        MessageUtil.parse("<gray>Stock global : <yellow>" + item.getCurrentStock() + " unités</yellow></gray>"),
+                        Component.empty(),
+                        MessageUtil.parse("<dark_aqua>▸ Clic GAUCHE pour ACHETER</dark_aqua>"),
+                        MessageUtil.parse("<dark_green>▸ Clic DROIT pour VENDRE</dark_green>")
+                );
+            }
+
+            inventory.setItem(slot, builder.build());
         }
 
         // ------------ PendingClaim CHEST ------------
-
         ItemStack claimBox = new ItemStack(Material.ENDER_CHEST);
         ItemMeta claimMeta = claimBox.getItemMeta();
         if (claimMeta != null) {

@@ -3,19 +3,23 @@ package fr.romain.dustexchange.dustExchange.manager;
 import fr.romain.dustexchange.dustExchange.DustExchange;
 import fr.romain.dustexchange.dustExchange.model.MarketItem;
 import fr.romain.dustexchange.dustExchange.storage.MarketStorage;
-import fr.romain.dustexchange.dustExchange.util.ConfigKeys;
-import org.bukkit.Material;
+import fr.romain.dustexchange.dustExchange.util.ItemSerializer;
+import org.bukkit.inventory.ItemStack;
 
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicInteger;
 
 public class MarketManager {
-    private final Map<Material, MarketItem> items = new HashMap<>();
+    private final Map<String, MarketItem> items = new ConcurrentHashMap<>();
     private final MarketStorage storage;
     private final DustExchange plugin;
+
+    // Le verrou anti-désynchronisation
+    private final AtomicInteger syncTaskCounter = new AtomicInteger(0);
 
     public MarketManager(DustExchange plugin, MarketStorage storage) {
         this.plugin = plugin;
@@ -23,50 +27,75 @@ public class MarketManager {
         loadItems();
     }
 
-    public void loadItems() {
-        items.clear();
+    public CompletableFuture<Void> loadItems() {
+        int taskId = syncTaskCounter.incrementAndGet();
 
-        if (!plugin.getConfig().isConfigurationSection(ConfigKeys.ITEMS_ROOT)) {
-            plugin.getLogger().info("Aucun item trouvé dans la config.");
-            return;
-        }
+        return CompletableFuture.supplyAsync(() -> storage.getAllItemDefinitions())
+                .thenAccept(definitions -> {
+                    // Si une commande a relancé un loadItems() pendant qu'on téléchargeait, on abandonne
+                    if (syncTaskCounter.get() != taskId) {
+                        return;
+                    }
 
-        for (String key : plugin.getConfig().getConfigurationSection(ConfigKeys.ITEMS_ROOT).getKeys(false)) {
-            Material mat = Material.matchMaterial(key);
-            if (mat == null) continue;
+                    Map<String, MarketItem> newItems = new ConcurrentHashMap<>();
 
-            String path = ConfigKeys.ITEMS_ROOT + "." + key;
-            double basePrice = plugin.getConfig().getDouble(path + "." + ConfigKeys.BASE_PRICE);
-            int baseStock = plugin.getConfig().getInt(path + "." + ConfigKeys.BASE_STOCK);
+                    for (Map.Entry<String, String> entry : definitions.entrySet()) {
+                        try {
+                            String id = entry.getKey();
+                            String[] data = entry.getValue().split(";", 5);
 
-            MarketItem item = new MarketItem(mat, basePrice, baseStock, baseStock);
-            items.put(mat, item);
+                            double basePrice = Double.parseDouble(data[0]);
+                            int baseStock = Integer.parseInt(data[1]);
+                            int slot = Integer.parseInt(data[2]);
+                            boolean enabled = Boolean.parseBoolean(data[3]);
+                            ItemStack stack = ItemSerializer.fromBase64(data[4]);
 
-            CompletableFuture.supplyAsync(() -> storage.getStock(mat))
-                    .thenAccept(realStock -> {
-                        if (realStock != -999 && realStock >= 0) {
-                            item.setCurrentStock(realStock);
-                        } else if (realStock == -999 || realStock == -1) {
-                            CompletableFuture.runAsync(() -> storage.modifyStock(mat, baseStock));
+                            if (stack == null) continue;
+
+                            MarketItem item = new MarketItem(id, stack, basePrice, baseStock, baseStock, slot);
+                            item.setEnabled(enabled);
+                            newItems.put(id, item);
+
+                            int realStock = storage.getStock(id);
+                            if (realStock >= 0) {
+                                item.setCurrentStock(realStock);
+                            } else {
+                                storage.modifyStock(id, baseStock);
+                            }
+                        } catch (Exception e) {
+                            plugin.getLogger().warning("Erreur de parsing sur l'item : " + entry.getKey());
                         }
-                    });
-        }
-        plugin.getLogger().info(items.size() + " objets chargés dans le marché.");
+                    }
+
+                    items.clear();
+                    items.putAll(newItems);
+                });
     }
 
-    public void registerItem(MarketItem item) {
-        items.put(item.getMaterial(), item);
+    public Optional<MarketItem> getItem(String id) {
+        return Optional.ofNullable(items.get(id));
     }
 
-    public Optional<MarketItem> getItem(Material material) {
-        return Optional.ofNullable(items.get(material));
+    public Optional<MarketItem> getItemBySlot(int slot) {
+        return items.values().stream().filter(i -> i.getSlot() == slot).findFirst();
     }
 
-    public Map<Material, MarketItem> getItems() {
+    public Map<String, MarketItem> getItems() {
         return Collections.unmodifiableMap(items);
     }
 
     public MarketStorage getStorage() {
         return storage;
+    }
+
+    public CompletableFuture<Void> refreshOnlyStocks() {
+        return CompletableFuture.runAsync(() -> {
+            for (MarketItem item : items.values()) {
+                int realStock = storage.getStock(item.getId());
+                if (realStock >= 0) {
+                    item.setCurrentStock(realStock);
+                }
+            }
+        });
     }
 }

@@ -12,6 +12,8 @@ import fr.romain.dustexchange.dustExchange.util.ConfigKeys;
 import org.bukkit.Bukkit;
 import org.bukkit.plugin.java.JavaPlugin;
 
+import java.util.concurrent.CompletableFuture;
+
 public final class DustExchange extends JavaPlugin {
 
     private static final String DEFAULT_REDIS_HOST = "127.0.0.1";
@@ -50,17 +52,28 @@ public final class DustExchange extends JavaPlugin {
         }
 
         // ECOUTEUR (Pour update en temps réel même sur plusieurs serveurs)
-        this.storage.startListening(() -> {
-            getServer().getScheduler().runTask(this, () -> {
+        this.storage.startListening(message -> {
+            CompletableFuture<Void> updateTask = null;
 
+            if ("sync_items".equals(message)) {
+                updateTask = marketManager.loadItems();
+            } else if ("update".equals(message)) {
+                updateTask = marketManager.refreshOnlyStocks();
+            }
 
-                for (org.bukkit.entity.Player player : getServer().getOnlinePlayers()) {
-                    org.bukkit.inventory.InventoryView view = player.getOpenInventory();
-                    if (view.getTopInventory().getHolder() instanceof fr.romain.dustexchange.dustExchange.gui.MarketMenu menu) {
-                        menu.refresh();
-                    }
-                }
-            });
+            if (updateTask != null) {
+                updateTask.thenRun(() -> {
+                    // Main Thread pour rafraîchir les GUI
+                    getServer().getScheduler().runTask(this, () -> {
+                        for (org.bukkit.entity.Player player : getServer().getOnlinePlayers()) {
+                            org.bukkit.inventory.InventoryView view = player.getOpenInventory();
+                            if (view.getTopInventory().getHolder() instanceof fr.romain.dustexchange.dustExchange.gui.MarketMenu menu) {
+                                menu.refresh();
+                            }
+                        }
+                    });
+                });
+            }
         });
 
         // ------------- LISTENER -------------

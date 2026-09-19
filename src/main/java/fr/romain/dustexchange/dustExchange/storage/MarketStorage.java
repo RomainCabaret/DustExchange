@@ -1,17 +1,25 @@
 package fr.romain.dustexchange.dustExchange.storage;
 
 import org.bukkit.Material;
+import org.bukkit.inventory.ItemStack;
 
 import java.util.Map;
 import java.util.UUID;
+import java.util.function.Consumer;
 
 public interface MarketStorage {
 
-    long modifyStock(Material material, int currentStock);
-    int getStock(Material material);
+    long modifyStock(String id, int amount);
+    int getStock(String id);
     void close();
-    void startListening(Runnable onUpdate);
-    void addPendingClaim(UUID uuid, String material, int amount);
+    void startListening(Consumer<String> onMessage);
+
+    void addPendingClaim(UUID uuid, String id, int amount);
     Map<String, String> getPendingClaims(UUID uuid);
-    void removePendingClaim(UUID uuid, String material);
+    void removePendingClaim(UUID uuid, String id);
+
+    void deleteStock(String id);
+    void saveItemDefinition(String id, ItemStack item, double basePrice, int baseStock, int slot, boolean enabled);
+    void removeItemDefinition(String id);
+    Map<String, String> getAllItemDefinitions();
 }

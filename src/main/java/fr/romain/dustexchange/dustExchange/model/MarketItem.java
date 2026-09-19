@@ -1,9 +1,11 @@
 package fr.romain.dustexchange.dustExchange.model;
 
-import org.bukkit.Material;
+import org.bukkit.inventory.ItemStack;
 
 public class MarketItem {
-    private final Material material;
+
+    private final String id;
+    private final ItemStack itemStack;
     private final double basePrice;
     private final int baseStock;
     private int currentStock;
@@ -12,8 +14,12 @@ public class MarketItem {
     private final double maxPrice;
     private final double spreadMargin;
 
-    public MarketItem(Material material, double basePrice, int baseStock, int currentStock) {
-        this.material = material;
+    private final int slot;
+    private boolean enabled = true;
+
+    public MarketItem(String id, ItemStack itemStack, double basePrice, int baseStock, int currentStock, int slot) {
+        this.id = id;
+        this.itemStack = itemStack;
         this.basePrice = basePrice;
         this.baseStock = baseStock;
         this.currentStock = Math.max(0, currentStock);
@@ -21,6 +27,8 @@ public class MarketItem {
         this.minPrice = Math.round((basePrice * 0.10) * 100.0) / 100.0;
         this.maxPrice = Math.round((basePrice * 10.0) * 100.0) / 100.0;
         this.spreadMargin = 0.15;
+
+        this.slot = slot;
     }
 
     private double getRawPrice() {
@@ -50,10 +58,6 @@ public class MarketItem {
         return true;
     }
 
-    public Material getMaterial() {
-        return material;
-    }
-
     public double getBasePrice() {
         return basePrice;
     }
@@ -72,4 +76,12 @@ public class MarketItem {
 
     public double getMinPrice() { return minPrice; }
     public double getMaxPrice() { return maxPrice; }
+
+    public int getSlot() { return slot; }
+
+    public boolean isEnabled() { return enabled; }
+    public void setEnabled(boolean enabled) { this.enabled = enabled; }
+
+    public String getId() { return id; }
+    public ItemStack getItemStack() { return itemStack.clone(); } // Clone pour la sécurité
 }

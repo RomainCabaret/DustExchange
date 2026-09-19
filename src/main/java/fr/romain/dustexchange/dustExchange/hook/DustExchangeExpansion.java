@@ -2,7 +2,6 @@ package fr.romain.dustexchange.dustExchange.hook;
 
 import fr.romain.dustexchange.dustExchange.manager.MarketManager;
 import me.clip.placeholderapi.expansion.PlaceholderExpansion;
-import org.bukkit.Material;
 import org.bukkit.OfflinePlayer;
 import org.jetbrains.annotations.NotNull;
 
@@ -40,13 +39,16 @@ public class DustExchangeExpansion extends PlaceholderExpansion {
         if (args.length != 2) return null;
 
         String type = args[0].toLowerCase();
-        Material material = Material.matchMaterial(args[1]);
+        int slot;
 
-        if (material == null) return "INVALIDE";
+        try {
+            slot = Integer.parseInt(args[1]);
+        } catch (NumberFormatException e) {
+            return "SLOT_INVALIDE";
+        }
 
-        // Ex "buyprice_DIAMOND", "sellprice_DIAMOND", "stock_DIAMOND"
-
-        return marketManager.getItem(material).map(item -> {
+        // Ex: "%dustexchange_buyprice_10%", "%dustexchange_sellprice_10%", "%dustexchange_stock_10%"
+        return marketManager.getItemBySlot(slot).map(item -> {
             switch (type) {
                 case "buyprice":
                     return String.format(java.util.Locale.US, "%.2f", item.getBuyPrice());

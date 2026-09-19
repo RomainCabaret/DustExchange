@@ -1,12 +1,14 @@
 package fr.romain.dustexchange.dustExchange.storage;
 
-import org.bukkit.Material;
+import fr.romain.dustexchange.dustExchange.util.ItemSerializer;
+import org.bukkit.inventory.ItemStack;
 import redis.clients.jedis.Jedis;
 import redis.clients.jedis.JedisPubSub;
 import redis.clients.jedis.RedisClient;
 
 import java.util.Map;
 import java.util.UUID;
+import java.util.function.Consumer;
 import java.util.logging.Logger;
 
 public class RedisMarketStorage implements MarketStorage {
@@ -15,8 +17,10 @@ public class RedisMarketStorage implements MarketStorage {
     private final Logger logger;
 
     private static final String REDIS_KEY = "dustexchange:stocks";
-    private static final String CHANNEL = "dustexchange:sync";
     private static final String CLAIMS_PREFIX = "dustexchange:claims:";
+    private static final String REDIS_ITEMS_KEY = "dustexchange:items_def";
+
+    private static final String CHANNEL = "dustexchange:sync";
 
     private Thread subscriberThread;
     private JedisPubSub jedisPubSub;
@@ -32,9 +36,9 @@ public class RedisMarketStorage implements MarketStorage {
     }
 
     @Override
-    public long modifyStock(Material material, int amount) {
+    public long modifyStock(String id, int amount) {
         try {
-            long newStock = client.hincrBy(REDIS_KEY, material.name(), amount);
+            long newStock = client.hincrBy(REDIS_KEY, id, amount);
 
             client.publish(CHANNEL, "update");
             return newStock;
@@ -45,9 +49,9 @@ public class RedisMarketStorage implements MarketStorage {
     }
 
     @Override
-    public int getStock(Material material) {
+    public int getStock(String id) {
         try {
-            String stockString = client.hget(REDIS_KEY, material.name());
+            String stockString = client.hget(REDIS_KEY, id);
             if (stockString != null) {
                 return Integer.parseInt(stockString);
             }
@@ -58,12 +62,55 @@ public class RedisMarketStorage implements MarketStorage {
     }
 
     @Override
-    public void startListening(Runnable onUpdate) {
+    public void deleteStock(String id) {
+        try {
+            client.hdel(REDIS_KEY, id);
+            client.publish(CHANNEL, "update");
+        } catch (Exception e) {
+            logger.severe("Erreur Redis (DeleteStock) : " + e.getMessage());
+        }
+    }
+
+    @Override
+    public void saveItemDefinition(String id, ItemStack item, double basePrice, int baseStock, int slot, boolean enabled) {
+        try {
+            String base64 = ItemSerializer.toBase64(item);
+            String data = basePrice + ";" + baseStock + ";" + slot + ";" + enabled + ";" + base64;
+            client.hset(REDIS_ITEMS_KEY, id, data);
+            client.publish(CHANNEL, "sync_items");
+        } catch (Exception e) {
+            logger.severe("Erreur Redis (SaveItem) : " + e.getMessage());
+        }
+    }
+
+    @Override
+    public void removeItemDefinition(String id) {
+        try {
+            client.hdel(REDIS_ITEMS_KEY, id);
+            client.hdel(REDIS_KEY, id); // Dégage aussi le stock dynamique
+            client.publish(CHANNEL, "sync_items");
+        } catch (Exception e) {
+            logger.severe("Erreur Redis (RemoveItem) : " + e.getMessage());
+        }
+    }
+
+    @Override
+    public Map<String, String> getAllItemDefinitions() {
+        try {
+            return client.hgetAll(REDIS_ITEMS_KEY);
+        } catch (Exception e) {
+            logger.severe("Erreur Redis (GetItems) : " + e.getMessage());
+            return java.util.Collections.emptyMap();
+        }
+    }
+
+    @Override
+    public void startListening(Consumer<String> onMessage) {
         this.jedisPubSub = new JedisPubSub() {
             @Override
             public void onMessage(String channel, String message) {
                 if (channel.equals(CHANNEL)) {
-                    onUpdate.run();
+                    onMessage.accept(message);
                 }
             }
         };
@@ -78,7 +125,6 @@ public class RedisMarketStorage implements MarketStorage {
         this.subscriberThread.start();
     }
 
-
     @Override
     public void close() {
         if (jedisPubSub != null) {
@@ -92,16 +138,19 @@ public class RedisMarketStorage implements MarketStorage {
             logger.info("Connexion Redis fermee.");
         }
     }
+
     // --------------- PENDING CLAIM SYSTEME
 
-    public void addPendingClaim(UUID uuid, String material, int amount) {
+    @Override
+    public void addPendingClaim(UUID uuid, String id, int amount) {
         try {
-            client.hincrBy(CLAIMS_PREFIX + uuid.toString(), material, amount);
+            client.hincrBy(CLAIMS_PREFIX + uuid.toString(), id, amount);
         } catch (Exception e) {
             logger.severe("Erreur Redis (AddClaim) : " + e.getMessage());
         }
     }
 
+    @Override
     public Map<String, String> getPendingClaims(UUID uuid) {
         try {
             return client.hgetAll(CLAIMS_PREFIX + uuid.toString());
@@ -111,9 +160,10 @@ public class RedisMarketStorage implements MarketStorage {
         }
     }
 
-    public void removePendingClaim(UUID uuid, String material) {
+    @Override
+    public void removePendingClaim(UUID uuid, String id) {
         try {
-            client.hdel(CLAIMS_PREFIX + uuid.toString(), material);
+            client.hdel(CLAIMS_PREFIX + uuid.toString(), id);
         } catch (Exception e) {
             logger.severe("Erreur Redis (RemoveClaim) : " + e.getMessage());
         }
